@@ -1,0 +1,99 @@
+== 信号处理
+
+一般情况下，信号只需要往 Master 进程发送就可以了。然而，Unicorn 在内部也用信号的方式把信号发往各个子进程。除了 TTIN/TTOU 之外，信号的处理方式和 {nginx}[http://nginx.net/] 相似，所以可以共用 Unicorn 和 Nginx 的管理脚本。
+
+
+这是一个 init script 管理分布式 Unicorn 的例子：
+http://unicorn.bogomips.org/examples/init.sh
+
+=== Master 进程
+
+* HUP - 重新载入配置文件，并且完整的重启所有子进程。
+  如果 "preload_app" 为 false (默认的)，那么子进程将会在重启的时候载入所有的应用程序代码。
+  如果  "preload_app" 为 true，那么应用程序代码改变将不会被重新载入；USR2 + QUIT (看下面的内容) 就是用来解决这这样的场景。在重启的时候，+Gem.refresh+ 会被调用，所以你新装的 RubyGems 也会被载入。不建议你在 Unicorn 跑着的时候卸载你应用程序依赖的 RubyGems，不然重新开启的子进程将会由于卸载掉的 Gem 依赖而启动失败。
+
+* INT/TERM - 快速关闭，立刻杀掉所有子进程。
+
+* QUIT - 正常关闭，关闭前会等待子进程完成进行中请求。
+
+* USR1 - Master 进程与子进程重新打开所有的 log 文件，详见 Unicorn::Util.reopen_logs 是如何处理 log 的。
+
+* USR2 - 重新启动，将会启动一个新的 Master 进程，当启动完成并且验证通过或，会发送 QUIT 到原始进程上面。
+
+* WINCH - 正常结束子进程，但保持 Master 进程活着。
+  此方法只适用于 Master 进程。
+
+* TTIN - 增加一个子进程。
+
+* TTOU - 减少一个子进程。
+
+=== 子进程
+
+提示: Unicorn 4.8 里面大多数场景 Master 进程是通过 pipe 往子进程发送信号，而不是用 kill。然而也是支持信号的方式。
+
+一般不需要直接往子进程发送信号，如果 Master 进程在运行，任何一个退出的子进程将会自动重新开启。
+
+* INT/TERM - 快速关闭，立刻退出。
+  除非 WINCH 已经发给 Master 了（或 Master 已经没了），不然 Master 将会自动重新开启一个新进程出来。
+  直接关闭在 Unicorn 4.8 里面任然是用 kill(2) 的方式，而不是用内部 pipe。
+
+* QUIT - 正常退出，直达当前处理结束。
+  同样的，如果 Master 还在，会又新开一个新的子进程出来。
+  
+* USR1 - 让此子进程重新打开 log 文件。
+  详见 Unicorn::Util.reopen_logs 是如何处理 log。
+  Log 文件在进程处理完当前请求之前不会重新打开的，
+  所以同一个请求的多行的 log 最终会写到同一个文件里面。
+
+  It is NOT recommended to send the USR1 signal directly to workers via
+  "killall -USR1 unicorn" if you are using user/group-switching support
+  in your workers.  You will encounter incorrect file permissions and
+  workers will need to be respawned.  Sending USR1 to the master process
+  first will ensure logs have the correct permissions before the master
+  forwards the USR1 signal to workers.
+
+=== Procedure to replace a running unicorn executable
+
+You may replace a running instance of unicorn with a new one without
+losing any incoming connections.  Doing so will reload all of your
+application code, Unicorn config, Ruby executable, and all libraries.
+The only things that will not change (due to OS limitations) are:
+
+1. The path to the unicorn executable script.  If you want to change to
+   a different installation of Ruby, you can modify the shebang
+   line to point to your alternative interpreter.
+
+The procedure is exactly like that of nginx:
+
+1. Send USR2 to the master process
+
+2. Check your process manager or pid files to see if a new master spawned
+   successfully.  If you're using a pid file, the old process will have
+   ".oldbin" appended to its path.  You should have two master instances
+   of unicorn running now, both of which will have workers servicing
+   requests.  Your process tree should look something like this:
+
+     unicorn master (old)
+     \_ unicorn worker[0]
+     \_ unicorn worker[1]
+     \_ unicorn worker[2]
+     \_ unicorn worker[3]
+     \_ unicorn master
+        \_ unicorn worker[0]
+        \_ unicorn worker[1]
+        \_ unicorn worker[2]
+        \_ unicorn worker[3]
+
+3. You can now send WINCH to the old master process so only the new workers
+   serve requests.  If your unicorn process is bound to an interactive
+   terminal (not daemonized), you can skip this step.  Step 5 will be more
+   difficult but you can also skip it if your process is not daemonized.
+
+4. You should now ensure that everything is running correctly with the
+   new workers as the old workers die off.
+
+5. If everything seems ok, then send QUIT to the old master.  You're done!
+
+   If something is broken, then send HUP to the old master to reload
+   the config and restart its workers.  Then send QUIT to the new master
+   process.
