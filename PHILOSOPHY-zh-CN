@@ -1,0 +1,92 @@
+= Unicorn 背后的哲学
+
+作为一个仅运行在 Unix-like 平台的服务，Unicorn 非常依赖 Unix 哲学来做每一件事情（或者说期望）并且做好。尽管使用 HTTP 协议，但 Unicorn 是严格意义后端应用服务器，用于运行基于 Rack 的 Ruby 应用程序。
+
+== 减少复杂性
+
+Unicorn 是靠依赖有缓冲区的反向代理服务软件来有效的处理慢客户端（slow clients）请求，而不是试图自己来解决这些问题。
+
+Unicorn 使用老式的 fork 子进程阻塞 I/O 的工作方式。我们的处理模式和许多时髦的多线程或基于事件的非阻塞 I/O 模式相对立。
+
+=== Threads 和 Events 是困难的
+
+...有过太多的开发者。存在疑惑的原因是没有读过这个文件。Unicorn 避免进程间的并发，这样你这样你不用怎么关心这些事情。当然 Unicorn 能使用多进程来利用核 CPU。应用程序内部依然可使用 Thread 功能。
+
+== Slow Clients 是罪魁祸首
+
+> 译者注：Slow clients 一般指网络请求到服务器较慢，或延迟高，或传输内容较多传输（上传/下载）耗时的连接。
+
+常见的许多的测试报告没有告述你，Unicorn 并不担心 Slow clients... 但是 <i>你</i> 需要关心。
+
+一个 "Slow client" 可能是任何一个在你数据中心以外的客户端。局域网的网络传输总是比外部网络更快。物理定律不允许。
+
+持久性连接（长连接）用于 HTTP/1.1 用于减少开启 TCP 时的延迟。可当客户端处于闲置状态的时候，它们还浪费了服务器资源。
+
+持久性连接意味着一个 Unicorn 进程（取决于你的应用程序，它可能非常耗内存）把大量的时间用于保持连接<i>或者什么都没做</i>。单线程阻塞 I/O 模式，一个进程（worker）在保持连接的时候处理其他的进程。所以，Unicorn 无法实现持久性连接。
+
+如果你的应用需要响应大于 socket buffer 的 Response，或需要处理大的 Request（比如上传），Unicorn 子进程的速度的瓶颈讲取决于客户端的速度。所以你不应该把 Unicorn 直接暴露在局域网以外给人访问（译者注：通过 Nginx 之类的 Proxy 服务来解决）。
+
+== 应用程序并发 != 网络并发
+
+
+性能在不同下的机器子系统以及网络部件环境下面表现是不同的。CPU 和内存每秒能处理 GB 的数据，互联网客户端一般只占其中很小的那部分。 
+Unicorn 的部署需要避免直接让客户端连接，而是放到反向代理服务器后面，从而避免慢的 I/O。
+
+== 通过反向代理服务改进性能
+
+增加一个反向代理服务来保护 Unciorn 遇到 Slow I/O，当然也不可避免的会增加 Proxy 和 Unicorn 之间传输的开销。然而，局域网的 I/O 传输是非常快的（并且用本地 sockets 更快），这种开销对于大多数的 HTTP 请求和响应来说是微不足道的。
+
+理想的反向代理服务软件应该满足下面的要求：
+
+1. 它能完全实现缓冲 HTTP 请求（以及大的 Response 响应输出）。
+   每个请求应该尽可能快的发送到 Unicorn 后端的进程上，这个是选择反向代理服务软件的首要条件。
+
+2. It should spend minimal time in userspace.  Network (and disk) I/O
+   are system-level tasks and usually managed by the kernel.
+   This may change if userspace TCP stacks become more popular in the
+   future; but the reverse proxy should not waste time with
+   application-level logic.  These concerns should be separated
+
+3. It should spend minimal time in userspace.  Network (and disk) I/O
+   are system-level tasks and usually managed by the kernel.
+   This may change if userspace TCP stacks become more popular in the
+   future; but the reverse proxy should not waste time with
+   application-level logic.  These concerns should be separated
+
+4. It should efficiently manage persistent connections (and
+   pipelining) to slow clients.  If you care to serve slow clients
+   outside your network, then these features of HTTP/1.1 will help.
+
+5. It should (optionally) serve static files.  If you have static
+   files on your site (especially large ones), they are far more
+   efficiently served with as few data copies as possible (e.g. with
+   sendfile() to completely avoid copying the data to userspace).
+
+Nginx 是唯一一个我们知道的能达到上面要求的（免费）的解决方案。
+
+实际上，不只是 Ruby 应用程序用 Unicorn + Nginx 反向代理的类似方式部署，还有 Apache/mod_perl, Apache/mod_php 以及 Apache Tomcat.
+每个种方式都是为了减少后端应用服务器在 Slow I/O 上面的等待时间，让后端资源利用更有效。
+
+== Worse Is Better
+
+需求和应用场景时常会有改变。因此，像 Ruby, 以及 Rails 之类的框架是为了构建一个让开发者能轻松应对变化。
+
+On the other hand, stable protocols which host your applications (HTTP
+and TCP) only change rarely.  This is why we recommend you NOT tie your
+rapidly-changing application logic directly into the processes that deal
+with the stable outside world.  Instead, use HTTP as a common RPC
+protocol to communicate between your frontend and backend.
+
+In short: separate your concerns.
+
+当然一个理论上“完美”的解决方案需要结合一些其他东西，最后_可能_会带来性能的提升，但这不是 Unix 的风格。
+
+== Just Worse in Some Cases
+
+Unicorn 并不适用所有的场景。Unicorn 专为那些 CPU/Memroy/Disk 密集，并且花较少时间等待外部资源（比如：数据库，外部 API）的场景而优化的。
+
+Unicorn 在 Comet/reverse-HTTP/push 这类 HTTP 连接大量时间处于空闲状态的场景下面效率低下。
+然而，这些对于 Unicorn 在便于维护，调试，管理方面能力，显得不重要。
+
+{Rainbows!}[http://rainbows.bogomips.org/] 致力于填补 Nginx + Unicorn 的某些方面不足。
+而 Rainbows! 管理方式很大程度和 Unicorn 相同，Rainbows! 目标更大也有一些真实环境的运用。
