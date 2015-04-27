@@ -1,0 +1,70 @@
+== 设计
+
+* 简单来说: Unicorn 是一种传统的 UNIX prefork web 服务器.
+  没用线程，这能让应用程序易于调试和维修。当你的应用程序出错，只需要 "kill -9" 即可解决失控的子进程，无需担心影响所有用户。只有 UNIX-like 的系统且支持 fork() 和文件句柄继承的才能支持.
+
+* Ragel+C HTTP 解析器来自于 Mongrel。这里只有非 Ruby 的部分，并且没有计划增加其他非 Ruby 实现的组件。
+
+* 所有 HTTP 解析以及 I/O 处理类似 Mongrel:
+    1. 读取/解析完整的 HTTP Request headers
+    2. 调用 Rack 应用程序
+    3. 写 HTTP Response，返回给客户端
+
+* 如同 Mongrel, 它也不支持 keepalive，也没有 pipelining.
+  这是因为 Unicorn 是专为快速并且低延迟的客户端而设计。只做一件事情，并且把它做好，慢客户端让 Nginx 处理。
+
+* 配置文件是 Ruby 预发。Ruby 会在 before_fork/after_fork/before_exec hooks 这类需要 lambdas 的时候表现更佳清晰。一个可选的，独立的配置文件用于修改配置信息。 (and also gives you plenty of rope if you RTFS
+  :>)
+
+* 一个 Master 进程管理多个子进程。Rack 应用程序只会被子进程调用（但它是能载入到 Master 进程里面的）。 可以用 "preload_app true" 来在 Ruby 2.0.0dev 以上或 REE 这些支持 copy-on-write friendly GC 的 Ruby 实现里面用来减少内存开销（详见 Unicorn::Configurator）。
+
+* 子进程数量应该至少和 CPU 核数一样，如果内存允许的话。如果你已有一个 Mongrel cluster 部署单线程 App，可以用和之前一样的进程数量。把所有的 HTTP 请求交给像 Nginx 这样的反向代理软件来管理，解决 Slow client 的问题。Unicorn 的扩容取决于你后端的处理能力限制。
+
+* 负载均衡有系统内核来实现。所有子进程共用一套非阻塞 socket, accept() 在上面。由系统内核来决定那个进程获得连接，那个该睡眠如果她没有接受内容的话。
+
+* Since non-blocking accept() is used, there can be a thundering
+  herd when an occasional client connects when application
+  *is not busy*.  The thundering herd problem should not affect
+  applications that are running all the time since worker processes
+  will only select()/accept() outside of the application dispatch.
+
+* Additionally, thundering herds are much smaller than with
+  configurations using existing prefork servers.  Process counts should
+  only be scaled to backend resources, _never_ to the number of expected
+  clients like is typical with blocking prefork servers.  So while we've
+  seen instances of popular prefork servers configured to run many
+  hundreds of worker processes, Unicorn deployments are typically only
+  2-4 processes per-core.
+
+* On-demand scaling of worker processes never happens automatically.
+  Again, Unicorn is concerned about scaling to backend limits and should
+  never configured in a fashion where it could be waiting on slow
+  clients.  For extremely rare circumstances, we provide TTIN and TTOU
+  signal handlers to increment/decrement your process counts without
+  reloading.  Think of it as driving a car with manual transmission:
+  you have a lot more control if you know what you're doing.
+
+* Blocking I/O is used for clients.  This allows a simpler code path
+  to be followed within the Ruby interpreter and fewer syscalls.
+  Applications that use threads continue to work if Unicorn
+  is only serving LAN or localhost clients.
+
+* SIGKILL is used to terminate the timed-out workers from misbehaving apps
+  as reliably as possible on a UNIX system.  The default timeout is a
+  generous 60 seconds (same default as in Mongrel).
+
+* The poor performance of select() on large FD sets is avoided
+  as few file descriptors are used in each worker.
+  There should be no gain from moving to highly scalable but
+  unportable event notification solutions for watching few
+  file descriptors.
+
+* If the master process dies unexpectedly for any reason,
+  workers will notice within :timeout/2 seconds and follow
+  the master to its death.
+
+* There is never any explicit real-time dependency or communication
+  between the worker processes nor to the master process.
+  Synchronization is handled entirely by the OS kernel and shared
+  resources are never accessed by the worker when it is servicing
+  a client.
