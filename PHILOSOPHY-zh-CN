@@ -69,7 +69,7 @@ Nginx 是唯一一个我们知道的能达到上面要求的（免费）的解�
 
 == Worse Is Better
 
-需求和应用场景时常会有改变。因此，像 Ruby, 以及 Rails 之类的框架是为了构建一个让开发者能轻松应对变化。
+需求和应用场景时常会有改变。因此，像 Ruby, 以及 Rails 之类的框架是为了构建一个让开发者能轻松应对变化的环境。
 
 On the other hand, stable protocols which host your applications (HTTP
 and TCP) only change rarely.  This is why we recommend you NOT tie your
