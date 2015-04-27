@@ -1,0 +1,56 @@
+= 调优 \Unicorn
+
+\Unicorn 的性能通常不对（大多数）Ruby web server. 大多的性能瓶颈在应用程序跑在 Unicorn 上而不是 Unicorn 本身的问题.
+
+== \Unicorn 配置
+
+浏览 Unicorn::Configurator 可了解 Unicorn 的配置文件格式。
++worker_processes+ 是时常需要调整的参数。
+
+=== Unicorn::Configurator#worker_processes
+
+* worker_processes 调整它以决定需要启动多少个子进程（worker）。 !不要!以你对外部网路客户端的数量的期望值来设定。
+  \Unicorn !并不!擅长用来处理慢客户端（slow clients）, 这些是 Nginx 的工作。
+
+* worker_processes 应当（至少）和部署机器的 CPU 核数一致（除非你的内存不够用）。
+  如果你的应用程序偶尔响应缓慢，而它又不是 CPU 密集型的应用，你可能需要增加一些 worker_processes 来解决缓慢的问题。
+
+* 在 Ruby 2.2 或以后的版本，内置函数 Etc.nprocessors 可以用来确定 CPU 核数。
+
+* worker_processes 你可能需要为 Unicorn::OobGC 增加一些数量，以提供稳定的响应时间。
+
+* 千万不要！把 worker_processes 数量增加到超出了物理内存，而导致命中到虚拟内存。生产环境服务器不应该存在活跃的虚拟内存。
+
+=== Unicorn::Configurator#listen Options
+
+* listen 参数 :backlog 设定到到一个非常低的值，能让故障发生的时候更快转移到其它的 cluster 上面。
+
+* 如果你正在做一个非常简单的性能测试，并且在高请求率下遇到连接错误的情况，增加 :backlog 的值（默认 1024）能帮助你减少连接错误。但请记住，如果你还有其他机器用作故障转移，这样的做法不建议在真实的环境下用（详见下面）。
+
+* :rcvbuf （接收缓冲） 和 :sndbuf (发送缓冲）参数在 Linux 2.6 上通常不需要设置，因为自动调优已经打开了。UNIX domain sockets (unix:// 这样的部署方式) 没有自动调整缓冲空间的功能，所以增加它们能确保 syscalls 和任务切换能处理大的 Request 和 Response。如果你的应用只会产生小的 Response，同时 Request 的内容也比较小，你可以减少它，从而减少内存开销。
+
+* 有过大的 socket 缓冲，反而可能会有害，或只起到微小的作用。巨大的缓冲区会导致更多的性能开销在 allocator 上，同时用不上 CPU 缓存，并不会像我们期望那样。
+
+* 如果和 Nginx 部署在同一台机器上，用 UNIX domain sockets 的方式能比 TCP 的方式稍微快一些。
+
+== 其他 \Unicorn 设置
+
+* 设置 "preload_app true" 能开启 GC 的 copy-on-write-friendly 功能，从而减少内存开销。像 TokyoCabinet 之类的数据库使用 concurrency-safe pread()/pwrite() 函数确保跨进程数据库文件共享的安全。在应用程序使用打开 socket 连接或随机读写文件的场景下它可能无法工作。
+
+* POSIX-compliant 文件系统能让线程或进程安全的往一个文件中增加内容，只要所有的进程没有开启文件写缓冲（File#sync = true）不然它们会在写之前先放到 POSIX 的 userspace 缓冲区。
+
+== Kernel 参数 (Linux sysctl)
+
+注意: 除非你足够了解，不然请不要修改系统参数。
+
+* net.core.rmem_max 和 net.core.wmem_max 能增加 :rcvbuf 和 :sndbuf 各自的允许的空间。它是主要且唯一用处是因为 UNIX domain sockets 无法自动调整缓冲空间。
+
+* 用 UNIX domain sockets 方式，同时用于性能测试的时候，你需要考虑增加 net.core.somaxconn，要不然 Nginx 会在高负载的时候开始连接失败。你也需要考虑在 listen 上设定更高的 :backlog 如前面指出的方法.
+
+* 如果你启动的服务超出本地端口限制，考虑降低 net.ipv4.tcp_fin_timeout 到 20-30 (默认: 60 秒)。同时考虑改变 net.ipv4.ip_local_port_range 来扩大可用端口范围。
+
+* 设定 net.ipv4.tcp_timestamps=1 将允许设定 net.ipv4.tcp_tw_reuse=1 和 net.ipv4.tcp_tw_recycle=1, 上面的设定可以减缓端口耗尽。并不是所有的网络环境都兼容这些配置，在你设定他们之前最好让网络管理员检查一下。
+
+* Increasing the MTU size can reduce framing overhead for larger
+  transfers.  One often-overlooked detail is that the loopback
+  device (usually "lo") can have its MTU increased, too.

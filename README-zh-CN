@@ -1,0 +1,123 @@
+= Unicorn: 基于 Rack，为 Fast clients 和 Unix 设计的 HTTP server。
+
+\Unicorn 一个 HTTP server，专为基于 Rack 的应用程序设计，并仅针对响应快并且低延迟的客户端（Fast clients），利用 Unix/Unix-like 内核的功能来提高连接带宽。Slow clients（高延迟、或网速慢的客户端，或未知的连接速度）的场景必须在 Unicorn 和 Slow clients 之前增加一个具有 Request、Response 缓冲区的反向代理服务（例如: {nginx}[http://nginx.net/]）。
+
+== 功能
+
+* 专为 Rack，Unix，fast clients 设计，并且易于调试。我们让所有功能更好的支持操作系统、{nginx}[http://nginx.net/]、{Rack}[http://rack.github.io/] 更好支持的一切。
+
+* 兼容 Ruby 1.9.3 以及之后的版本。
+  unicorn 4.8.x 将会继续支持 Ruby 1.8.
+
+* 进程管理：\Unicorn 将会在 worker 崩溃的时候自动重新启动 worker。你无需自己管理端口和进程。 \Unicorn 能按你的要求开启和管理多个子进程。
+
+* 负载均衡是由系统内核来完成的，请求将不会在一个忙碌的进程上面堆积。
+
+* 不需要关心你的应用是否是线程安全的，workers 都是跑在自己独立的内存空间，并且为了最大的稳定性它们同一时刻只会响应一个客户端的请求。
+
+* 支持所有基于 Rack 实现的应用程序, 比如 Rails。 (PS: along with pre-Rack versions of
+  Ruby on Rails via a Rack wrapper).
+
+* 内置 USR1 信号，能让你应用重新打开所有 log 文件。这个功能可以让 logrotate 快速用重命名的方式自动分割文件，而不是用缓慢的复制裁剪方式。
+  \Unicorn 还有措施来确保一个请求里面的多行日志信息能写到同一个文件里面。
+
+* Nginx 风格二进制文件升级方式，以避免升级时连接丢失。
+  你可以在不关闭客户度连接的情况下，升级 \Unicorn，应用程序，三方，甚至 Ruby。
+
+* 让你的应用程序有特别需要的时候，before_fork 和 after_fork hooks 可以编写一些特别的处理代码，让他们在 fork 子进程的时候执行。别忘了将 preload_app 设成 true（默认: false）。
+
+* 能使用 copy-on-write-friendly 机制来减少内存开销（需要设定 "preload_app" 为 true）。
+
+* 可以监听在多个 UNIX sockets 上面，每个子进程还能通过 after_fork 绑定一个私有端口以便于调试。
+
+* 简单好用的 Ruby DSL 配置方式.
+
+* Decodes chunked transfers on-the-fly, thus allowing upload progress
+  notification to be implemented as well as being able to tunnel
+  arbitrary stream-based protocols over HTTP.
+
+== License
+
+\Unicorn is copyright 2009 by all contributors (see logs in git).
+It is based on Mongrel 1.1.5.
+Mongrel is copyright 2007 Zed A. Shaw and contributors.
+
+\Unicorn is licensed under (your choice) of the GPLv2 or later
+(GPLv3+ preferred), or Ruby (1.8)-specific terms.
+See the included LICENSE file for details.
+
+\Unicorn is 100% Free Software.
+
+== Install
+
+The library consists of a C extension so you'll need a C compiler
+and Ruby development libraries/headers.
+
+You may install it via RubyGems on RubyGems.org:
+
+  gem install unicorn
+
+You can get the latest source via git from the following locations
+(these versions may not be stable):
+
+  git://bogomips.org/unicorn.git
+  git://repo.or.cz/unicorn.git (mirror)
+
+You may browse the code from the web and download the latest snapshot
+tarballs here:
+
+* http://bogomips.org/unicorn.git (cgit)
+* http://repo.or.cz/w/unicorn.git (gitweb)
+
+See the HACKING guide on how to contribute and build prerelease gems
+from git.
+
+== Usage
+
+=== Rack (including Rails 3+) applications
+
+In APP_ROOT, run:
+
+  unicorn
+
+=== Ancient Rails 1.2 - 2.x versions
+
+In RAILS_ROOT, run:
+
+  unicorn_rails
+
+\Unicorn will bind to all interfaces on TCP port 8080 by default.
+You may use the +--listen/-l+ switch to bind to a different
+address:port or a UNIX socket.
+
+=== Configuration File(s)
+
+\Unicorn will look for the config.ru file used by rackup in APP_ROOT.
+
+For deployments, it can use a config file for \Unicorn-specific options
+specified by the +--config-file/-c+ command-line switch.  See
+Unicorn::Configurator for the syntax of the \Unicorn-specific options.
+The default settings are designed for maximum out-of-the-box
+compatibility with existing applications.
+
+Most command-line options for other Rack applications (above) are also
+supported.  Run `unicorn -h` to see command-line options.
+
+== Disclaimer
+
+There is NO WARRANTY whatsoever if anything goes wrong, but
+{let us know}[link:ISSUES.html] and we'll try our best to fix it.
+
+\Unicorn is designed to only serve fast clients either on the local host
+or a fast LAN.  See the PHILOSOPHY and DESIGN documents for more details
+regarding this.
+
+== Contact
+
+All feedback (bug reports, user/development dicussion, patches, pull
+requests) go to the mailing list/newsgroup.  See the ISSUES document for
+information on the {mailing list}[mailto:unicorn-public@bogomips.org].
+
+For the latest on \Unicorn releases, you may also finger us at
+unicorn@bogomips.org or check our NEWS page (and subscribe to our Atom
+feed).
