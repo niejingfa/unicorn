@@ -28,13 +28,12 @@
   applications that are running all the time since worker processes
   will only select()/accept() outside of the application dispatch.
 
-* Additionally, thundering herds are much smaller than with
-  configurations using existing prefork servers.  Process counts should
-  only be scaled to backend resources, _never_ to the number of expected
-  clients like is typical with blocking prefork servers.  So while we've
-  seen instances of popular prefork servers configured to run many
-  hundreds of worker processes, Unicorn deployments are typically only
-  2-4 processes per-core.
+* 此外, thundering herds are much smaller than with
+  configurations using existing prefork servers.  
+  进程数量调整应当根据后端资源情况来决定，_不要_ 像那些常见的 blocking 
+  prefor servers 那样以期望的客户端连接数量来设置。
+  不像那些流行的 prefork servers 需要配置几百个子进程，
+  Unicorn 通常每个 CPU 核部署 2-4 个进程。
 
 * On-demand scaling of worker processes never happens automatically.
   Again, Unicorn is concerned about scaling to backend limits and should
@@ -59,9 +58,7 @@
   unportable event notification solutions for watching few
   file descriptors.
 
-* If the master process dies unexpectedly for any reason,
-  workers will notice within :timeout/2 seconds and follow
-  the master to its death.
+* 假如 Master 进程因为任何无法预期的原因挂掉了，子进程将会在 :timeout/2 秒内跟随 Master 进程一起死掉。
 
 * There is never any explicit real-time dependency or communication
   between the worker processes nor to the master process.
