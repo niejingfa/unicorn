@@ -45,19 +45,15 @@ http://unicorn.bogomips.org/examples/init.sh
   Log 文件在进程处理完当前请求之前不会重新打开的，
   所以同一个请求的多行的 log 最终会写到同一个文件里面。
 
-  It is NOT recommended to send the USR1 signal directly to workers via
-  "killall -USR1 unicorn" if you are using user/group-switching support
-  in your workers.  You will encounter incorrect file permissions and
-  workers will need to be respawned.  Sending USR1 to the master process
-  first will ensure logs have the correct permissions before the master
-  forwards the USR1 signal to workers.
+  如果你的字进程启用了 user/group-switching，不建议用 "killall -USR1 unicorn" 
+  直接对子进程发送 USR1 的信号。 你会遇到文件权限的问题，子进程将会被迫重启。
+  如果是对 Master 进程发送 USR1 信号，它会在在下发信号给子进程之前，首先会确保日志文件有正确的权限。
 
 === Procedure to replace a running unicorn executable
 
-You may replace a running instance of unicorn with a new one without
-losing any incoming connections.  Doing so will reload all of your
-application code, Unicorn config, Ruby executable, and all libraries.
-The only things that will not change (due to OS limitations) are:
+你是可以在不丢失已经接上的客户端连接的情况下，用一个新的 Unicorn 实例来替代老的。
+那么做是可以重新载入你的应用程序源代码、Unicorn 配置、Ruby 可执行文件、以及所有的类库。
+但是下面这些无法改变（和系统限制有关）：
 
 1. The path to the unicorn executable script.  If you want to change to
    a different installation of Ruby, you can modify the shebang
