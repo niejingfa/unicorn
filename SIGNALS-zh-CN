@@ -49,25 +49,21 @@ http://unicorn.bogomips.org/examples/init.sh
   直接对子进程发送 USR1 的信号。 你会遇到文件权限的问题，子进程将会被迫重启。
   如果是对 Master 进程发送 USR1 信号，它会在在下发信号给子进程之前，首先会确保日志文件有正确的权限。
 
-=== Procedure to replace a running unicorn executable
+=== 运行中的 Unicorn 进程热更新过程
 
 你是可以在不丢失已经接上的客户端连接的情况下，用一个新的 Unicorn 实例来替代老的。
 那么做是可以重新载入你的应用程序源代码、Unicorn 配置、Ruby 可执行文件、以及所有的类库。
+
 但是下面这些无法改变（和系统限制有关）：
 
-1. The path to the unicorn executable script.  If you want to change to
-   a different installation of Ruby, you can modify the shebang
-   line to point to your alternative interpreter.
+1. Unciron 的执行脚本路径。如果你想更换成另外一个 Ruby 安装路径，你可以修改 `#!` 行（PS: Bash script 的第一行）来执行不同的 Ruby 版本。
 
-The procedure is exactly like that of nginx:
+Unicorn Reload 过程和 Nginx 类似：
 
-1. Send USR2 to the master process
+1. 发送 USR2 信号到 master 进程
 
-2. Check your process manager or pid files to see if a new master spawned
-   successfully.  If you're using a pid file, the old process will have
-   ".oldbin" appended to its path.  You should have two master instances
-   of unicorn running now, both of which will have workers servicing
-   requests.  Your process tree should look something like this:
+2. 检查你的进程管理器或 pid 文件，看是否新的 master 是否启动成。如果使用 pid 文件，那么老进程的 pid 文件将会增加 ".oldbin" 后缀。
+	同时将会有两组 master 进程在同时运行，它们的 workers 都能接受请求。进程树看起来会是这样：
 
      unicorn master (old)
      \_ unicorn worker[0]
@@ -80,16 +76,10 @@ The procedure is exactly like that of nginx:
         \_ unicorn worker[2]
         \_ unicorn worker[3]
 
-3. You can now send WINCH to the old master process so only the new workers
-   serve requests.  If your unicorn process is bound to an interactive
-   terminal (not daemonized), you can skip this step.  Step 5 will be more
-   difficult but you can also skip it if your process is not daemonized.
+3. 现在可以发送 WINCH 到 old master 进程，于是会切换为仅 new workers 能处理请求。如果你是以交互模式启动 Unicorn（非 daemon），你可以跳过此步。后面第 5 步会有点困难，不过你依然可以跳过，如果不是 daemon 模式。
 
-4. You should now ensure that everything is running correctly with the
-   new workers as the old workers die off.
+4. 现在你检查功能，确保从 old workers 切到 new workers 后，所有事情都正确运行。
 
-5. If everything seems ok, then send QUIT to the old master.  You're done!
-
-   If something is broken, then send HUP to the old master to reload
-   the config and restart its workers.  Then send QUIT to the new master
-   process.
+5. 如果一切看起来都是正常的，你可以发送 QUIT 信号到 old master 来结束 old master 的进程。
+	
+	如果有不正常的情况，你可以发送 HUP 信号到 old master 来恢复到 old master，然后发送 QUIT 到 new master 来终止。以达到回滚目的。
